@@ -7,15 +7,17 @@ client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 SYSTEM_PROMPT = """Sos un asistente interno de GL Farma, una cadena de farmacias en Argentina.
 Ayudás a los empleados a resolver consultas de dispensación en el mostrador.
 
-FORMATO DE RESPUESTA:
-- Máximo 4 líneas
-- Sin advertencias ni recomendaciones
-- Español rioplatense
+REGLAS CRÍTICAS:
+1. PRESTADORES: buscá en la base local. Respondé "✅ figura (Mat. X)" o "❌ No figura"
+2. COMISIONADOS: SIEMPRE mostrá primero los productos del listado comisionado de GL Farma. Solo si no hay comisionados, mencioná otras marcas.
+3. RECETA CON MÚLTIPLES DROGAS: cada droga es INDEPENDIENTE. NUNCA combines drogas de distintos renglones. Tratá cada una por separado.
+4. NORMAS DE OBRAS SOCIALES: si no encontrás en la base local, podés buscar en colfarma.org.ar. Solo usá web search para normas/novedades, NUNCA para prestadores ni comisionados.
+5. Máximo 5 líneas. Sin advertencias innecesarias. Español rioplatense.
 
-PARA PRESTADORES: "👨‍⚕️ [Nombre] → ✅ figura (Mat. [tipo] [número])" o "❌ No figura"
-PARA COMISIONADOS: "💊 [DROGA] — [Lab1], [Lab2]..."
-PARA NORMAS DE OBRAS SOCIALES: respondé con la info relevante de forma concisa
-PARA RECETA COMPLETA: primero prestador, después comisionados"""
+FORMATO PARA RECETA COMPLETA:
+👨‍⚕️ [Prestador] → ✅/❌
+💊 [DROGA 1]: [comisionados primero]
+💊 [DROGA 2]: [comisionados primero]"""
 
 
 def search_droga(word: str) -> list:
@@ -29,11 +31,19 @@ def search_droga(word: str) -> list:
     return results[:3]
 
 
+def is_norma_query(query: str) -> bool:
+    keywords = ["norma", "novedad", "cambio", "actualiz", "vigente", "cobertura",
+                "autoriza", "requiere", "necesita", "boletin", "informacion",
+                "coseguro", "plan", "dispensa", "recetario", "validaci"]
+    q = query.lower()
+    return any(kw in q for kw in keywords)
+
+
 def search_knowledge_base(query: str) -> str:
-    # Búsqueda local primero
     context_parts = []
     prestador_docs = search_exact(query)
     seen_texts = set()
+
     for doc in prestador_docs[:3]:
         if doc["text"] not in seen_texts:
             context_parts.append(f"[PRESTADORES - {doc['source']}]\n{doc['text']}")
@@ -55,36 +65,27 @@ def search_knowledge_base(query: str) -> str:
                 seen_texts.add(doc["text"])
 
     context = "\n\n---\n\n".join(context_parts[:7]) if context_parts else ""
+    use_web_search = is_norma_query(query) and not context_parts
 
-    prompt = f"""Sos un asistente interno de GL Farma. Respondé en máximo 4 líneas, sin advertencias, en español rioplatense.
+    prompt = f"""{"Datos de la base GL Farma:" + chr(10) + context + chr(10) + chr(10) + "---" + chr(10) if context else "No encontré datos en la base local." + chr(10)}
 
-{"Datos de la base GL Farma:" + chr(10) + context + chr(10) + chr(10) + "---" + chr(10) if context else ""}
+Consulta: {query}"""
 
-Consulta del empleado: {query}
-
-Si no encontrás la info en la base local, buscá en colfarma.org.ar para responder sobre normas de obras sociales."""
+    tools = [{"type": "web_search_20250305", "name": "web_search"}] if use_web_search else []
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=400,
         system=SYSTEM_PROMPT,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
+        tools=tools if tools else anthropic.NOT_GIVEN,
         messages=[{"role": "user", "content": prompt}]
     )
 
-    # Extraer texto de la respuesta (puede incluir tool use)
-    text_parts = []
-    for block in response.content:
-        if hasattr(block, "text"):
-            text_parts.append(block.text)
-
-    # Si usó web search, hacer segunda llamada con los resultados
-    if response.stop_reason == "tool_use":
+    if response.stop_reason == "tool_use" and tools:
         messages = [
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": response.content}
         ]
-        # Agregar resultados de tool
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
@@ -95,13 +96,13 @@ Si no encontrás la info en la base local, buscá en colfarma.org.ar para respon
                 })
         if tool_results:
             messages.append({"role": "user", "content": tool_results})
-            response2 = client.messages.create(
+            response = client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=400,
                 system=SYSTEM_PROMPT,
-                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                tools=tools,
                 messages=messages
             )
-            text_parts = [b.text for b in response2.content if hasattr(b, "text")]
 
+    text_parts = [b.text for b in response.content if hasattr(b, "text")]
     return "\n".join(text_parts) if text_parts else "❓ No encontré información sobre eso."
