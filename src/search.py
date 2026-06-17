@@ -13,7 +13,8 @@ FORMATO DE RESPUESTA:
 - Español rioplatense
 
 PARA PRESTADORES: "👨‍⚕️ [Nombre] → ✅ figura (Mat. [tipo] [número])" o "❌ No figura"
-PARA COMISIONADOS: "💊 [DROGA] — [Lab1], [Lab2]..." 
+PARA COMISIONADOS: "💊 [DROGA] — [Lab1], [Lab2]..."
+PARA NORMAS DE OBRAS SOCIALES: respondé con la info relevante de forma concisa
 PARA RECETA COMPLETA: primero prestador, después comisionados"""
 
 
@@ -29,9 +30,8 @@ def search_droga(word: str) -> list:
 
 
 def search_knowledge_base(query: str) -> str:
+    # Búsqueda local primero
     context_parts = []
-
-    # Búsqueda de prestador (exact match en cartilla)
     prestador_docs = search_exact(query)
     seen_texts = set()
     for doc in prestador_docs[:3]:
@@ -39,7 +39,6 @@ def search_knowledge_base(query: str) -> str:
             context_parts.append(f"[PRESTADORES - {doc['source']}]\n{doc['text']}")
             seen_texts.add(doc["text"])
 
-    # Búsqueda de droga — palabras de más de 5 letras
     words = [w for w in query.split() if len(w) > 5]
     for word in words:
         drug_docs = search_droga(word)
@@ -48,7 +47,6 @@ def search_knowledge_base(query: str) -> str:
                 context_parts.append(f"[COMISIONADOS - {doc['source']}]\n{doc['text']}")
                 seen_texts.add(doc["text"])
 
-    # Si no encontró nada, búsqueda vectorial general
     if not context_parts:
         docs = search_documents(query, n_results=5)
         for doc in docs:
@@ -56,17 +54,54 @@ def search_knowledge_base(query: str) -> str:
                 context_parts.append(f"[{doc['source']}]\n{doc['text']}")
                 seen_texts.add(doc["text"])
 
-    if not context_parts:
-        return "❓ No encontré información sobre eso en la base."
+    context = "\n\n---\n\n".join(context_parts[:7]) if context_parts else ""
 
-    context = "\n\n---\n\n".join(context_parts[:7])
-    prompt = f"Datos de la base GL Farma:\n\n{context}\n\n---\n\nConsulta del empleado: {query}"
+    prompt = f"""Sos un asistente interno de GL Farma. Respondé en máximo 4 líneas, sin advertencias, en español rioplatense.
+
+{"Datos de la base GL Farma:" + chr(10) + context + chr(10) + chr(10) + "---" + chr(10) if context else ""}
+
+Consulta del empleado: {query}
+
+Si no encontrás la info en la base local, buscá en colfarma.org.ar para responder sobre normas de obras sociales."""
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=350,
+        max_tokens=400,
         system=SYSTEM_PROMPT,
+        tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return response.content[0].text
+    # Extraer texto de la respuesta (puede incluir tool use)
+    text_parts = []
+    for block in response.content:
+        if hasattr(block, "text"):
+            text_parts.append(block.text)
+
+    # Si usó web search, hacer segunda llamada con los resultados
+    if response.stop_reason == "tool_use":
+        messages = [
+            {"role": "user", "content": prompt},
+            {"role": "assistant", "content": response.content}
+        ]
+        # Agregar resultados de tool
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": "Búsqueda completada"
+                })
+        if tool_results:
+            messages.append({"role": "user", "content": tool_results})
+            response2 = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=400,
+                system=SYSTEM_PROMPT,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=messages
+            )
+            text_parts = [b.text for b in response2.content if hasattr(b, "text")]
+
+    return "\n".join(text_parts) if text_parts else "❓ No encontré información sobre eso."
