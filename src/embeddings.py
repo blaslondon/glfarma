@@ -1,4 +1,5 @@
 import os
+import unicodedata
 import chromadb
 from chromadb.utils import embedding_functions
 
@@ -9,6 +10,11 @@ os.makedirs(CHROMA_PATH, exist_ok=True)
 
 _client = None
 _collection = None
+
+
+def normalize(text: str) -> str:
+    text = text.upper()
+    return ''.join(c for c in unicodedata.normalize('NFD', text) if unicodedata.category(c) != 'Mn')
 
 
 def get_chroma_client():
@@ -49,19 +55,20 @@ def search_exact(query: str):
     _, collection = get_chroma_client()
     if collection.count() == 0:
         return []
-    keywords = [w.upper() for w in query.split() if len(w) > 3]
+    keywords = [normalize(w) for w in query.split() if len(w) > 3]
     if not keywords:
         return []
     results = []
     seen = set()
     for kw in keywords:
-        try:
-            res = collection.get(where_document={"$contains": kw})
-            for i, doc in enumerate(res["documents"]):
-                if doc not in seen:
-                    seen.add(doc)
-                    meta = res["metadatas"][i]
-                    results.append({"text": doc, "source": meta.get("source", "Desconocido"), "page": meta.get("page", "?")})
-        except Exception:
-            pass
+        for variant in [kw, kw.lower(), kw.capitalize()]:
+            try:
+                res = collection.get(where_document={"$contains": variant})
+                for i, doc in enumerate(res["documents"]):
+                    if doc not in seen:
+                        seen.add(doc)
+                        meta = res["metadatas"][i]
+                        results.append({"text": doc, "source": meta.get("source", "Desconocido"), "page": meta.get("page", "?")})
+            except Exception:
+                pass
     return results[:4]
