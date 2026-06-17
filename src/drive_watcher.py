@@ -18,10 +18,13 @@ PROCESSED_FILE = Path("data/processed_files.json")
 
 
 def get_drive_service():
-    creds = Credentials.from_service_account_file(
-        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"],
-        scopes=SCOPES
-    )
+    sa_env = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+    # Soporta tanto path a archivo como JSON string directo
+    if sa_env.strip().startswith("{"):
+        info = json.loads(sa_env)
+        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    else:
+        creds = Credentials.from_service_account_file(sa_env, scopes=SCOPES)
     return build("drive", "v3", credentials=creds)
 
 
