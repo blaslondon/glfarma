@@ -65,7 +65,7 @@ def search_knowledge_base(query: str) -> str:
                 seen_texts.add(doc["text"])
 
     context = "\n\n---\n\n".join(context_parts[:7]) if context_parts else ""
-    use_web_search = is_norma_query(query) and not context_parts
+    use_web_search = not context_parts
 
     prompt = f"""{"Datos de la base GL Farma:" + chr(10) + context + chr(10) + chr(10) + "---" + chr(10) if context else "No encontré datos en la base local." + chr(10)}
 
