@@ -9,18 +9,18 @@ Ayudás a los empleados a resolver consultas de dispensación en el mostrador.
 
 REGLAS CRÍTICAS:
 1. PRESTADORES: buscá en la base local. Respondé "✅ figura (Mat. X)" o "❌ No figura"
-2. COMISIONADOS: SIEMPRE mostrá primero los productos del listado comisionado de GL Farma. Solo si no hay comisionados, mencioná otras marcas.
-3. RECETA CON MÚLTIPLES DROGAS: cada droga es INDEPENDIENTE. NUNCA combines drogas de distintos renglones. Tratá cada una por separado.
-4. NORMAS DE OBRAS SOCIALES: si no encontrás en la base local, podés buscar en colfarma.org.ar. Solo usá web search para normas/novedades, NUNCA para prestadores ni comisionados.
+2. COMISIONADOS: SIEMPRE mostrá primero los del listado comisionado GL Farma. Solo si no hay, mencioná otras marcas.
+3. MÚLTIPLES DROGAS: cada droga es INDEPENDIENTE. NUNCA las combines. Tratá cada una por separado.
+4. NORMAS: si no encontrás en la base local, buscá en colfarma.org.ar priorizando el boletín más reciente 2026.
 5. Máximo 5 líneas. Sin advertencias innecesarias. Español rioplatense.
 
-FORMATO PARA RECETA COMPLETA:
+FORMATO RECETA COMPLETA:
 👨‍⚕️ [Prestador] → ✅/❌
-💊 [DROGA 1]: [comisionados primero]
-💊 [DROGA 2]: [comisionados primero]"""
+💊 [DROGA 1]: [comisionados]
+💊 [DROGA 2]: [comisionados]"""
 
 
-def search_droga(word: str) -> list:
+def search_droga(word):
     results = search_exact(word)
     vec = search_documents(f"comisionado droga {word}", n_results=3)
     seen = set(d["text"] for d in results)
@@ -31,35 +31,23 @@ def search_droga(word: str) -> list:
     return results[:3]
 
 
-def is_norma_query(query: str) -> bool:
-    keywords = ["norma", "novedad", "cambio", "actualiz", "vigente", "cobertura",
-                "autoriza", "requiere", "necesita", "boletin", "informacion",
-                "coseguro", "plan", "dispensa", "recetario", "validaci"]
-    q = query.lower()
-    return any(kw in q for kw in keywords)
-
-
-def search_knowledge_base(query: str) -> str:
+def search_knowledge_base(query: str, history: list = None) -> str:
     context_parts = []
-    prestador_docs = search_exact(query)
     seen_texts = set()
 
-    for doc in prestador_docs[:3]:
+    for doc in search_exact(query)[:3]:
         if doc["text"] not in seen_texts:
             context_parts.append(f"[PRESTADORES - {doc['source']}]\n{doc['text']}")
             seen_texts.add(doc["text"])
 
-    words = [w for w in query.split() if len(w) > 5]
-    for word in words:
-        drug_docs = search_droga(word)
-        for doc in drug_docs[:2]:
+    for word in [w for w in query.split() if len(w) > 5]:
+        for doc in search_droga(word)[:2]:
             if doc["text"] not in seen_texts:
                 context_parts.append(f"[COMISIONADOS - {doc['source']}]\n{doc['text']}")
                 seen_texts.add(doc["text"])
 
     if not context_parts:
-        docs = search_documents(query, n_results=5)
-        for doc in docs:
+        for doc in search_documents(query, n_results=5):
             if doc["text"] not in seen_texts:
                 context_parts.append(f"[{doc['source']}]\n{doc['text']}")
                 seen_texts.add(doc["text"])
@@ -67,44 +55,30 @@ def search_knowledge_base(query: str) -> str:
     context = "\n\n---\n\n".join(context_parts[:7]) if context_parts else ""
     use_web_search = not context_parts
 
-    prompt = f"""{"Datos de la base GL Farma:" + chr(10) + context + chr(10) + chr(10) + "---" + chr(10) if context else "No encontré datos en la base local." + chr(10)}
+    messages = list(history[:-1]) if history else []
+    prompt = f"""{"Datos GL Farma:" + chr(10) + context + chr(10) + "---" + chr(10) if context else "No encontré en la base local." + chr(10)}
+Consulta: {query}{"" if context else chr(10) + "Buscá en colfarma.org.ar priorizando boletín más reciente 2026."}"""
 
-Consulta: {query}
-
-Si buscás en colfarma.org.ar, priorizá siempre la información más reciente — boletín más nuevo disponible (2026). La info vieja puede estar desactualizada."""
-
+    messages.append({"role": "user", "content": prompt})
     tools = [{"type": "web_search_20250305", "name": "web_search"}] if use_web_search else []
 
     response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=400,
+        model="claude-sonnet-4-6", max_tokens=400,
         system=SYSTEM_PROMPT,
         tools=tools if tools else anthropic.NOT_GIVEN,
-        messages=[{"role": "user", "content": prompt}]
+        messages=messages
     )
 
     if response.stop_reason == "tool_use" and tools:
-        messages = [
-            {"role": "user", "content": prompt},
-            {"role": "assistant", "content": response.content}
-        ]
-        tool_results = []
-        for block in response.content:
-            if block.type == "tool_use":
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": "Búsqueda completada"
-                })
+        messages.append({"role": "assistant", "content": response.content})
+        tool_results = [{"type": "tool_result", "tool_use_id": b.id, "content": "ok"}
+                        for b in response.content if b.type == "tool_use"]
         if tool_results:
             messages.append({"role": "user", "content": tool_results})
             response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=400,
-                system=SYSTEM_PROMPT,
-                tools=tools,
-                messages=messages
+                model="claude-sonnet-4-6", max_tokens=400,
+                system=SYSTEM_PROMPT, tools=tools, messages=messages
             )
 
     text_parts = [b.text for b in response.content if hasattr(b, "text")]
-    return "\n".join(text_parts) if text_parts else "❓ No encontré información sobre eso."
+    return "\n".join(text_parts) if text_parts else "❓ No encontré información."
