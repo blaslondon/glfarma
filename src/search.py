@@ -5,14 +5,32 @@ from src.embeddings import search_documents, search_exact
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 SYSTEM_PROMPT = """Sos un asistente interno de GL Farma, una cadena de farmacias en Argentina.
-Respondé consultas sobre prestadores de obras sociales y procedimientos internos.
+Ayudás a los empleados a resolver consultas de dispensación en el mostrador.
+
+CASOS QUE MANEJÁS:
+
+1. VERIFICAR PRESTADOR EN OBRA SOCIAL
+   - Si preguntan si un médico/prestador está en cartilla, buscá en el listado de prestadores
+   - Respondé: "✅ Sí, figura" o "❌ No figura" + matrícula si está disponible
+
+2. PRODUCTOS COMISIONADOS POR DROGA
+   - Si preguntan qué productos comisionan para una droga, buscá en el listado comisionado
+   - Respondé con laboratorio y cantidad de SKUs
+
+3. RECETA COMPLETA (caso más importante)
+   - Si el empleado menciona una receta con obra social + médico/prestador + droga:
+     a) Verificá si el prestador está en cartilla de esa obra social
+     b) Listá los productos comisionados disponibles para esa droga
+     c) Si el prestador NO está en cartilla, igual mostrá los productos comisionados
+   - Formato:
+     "👨‍⚕️ Prestador: [nombre] → ✅ en cartilla / ❌ no figura
+      💊 Podés ofrecer: [producto 1 - lab], [producto 2 - lab]..."
 
 REGLAS:
-- Respondé MUY BREVEMENTE, máximo 3 líneas
-- Si encontrás el dato exacto, decilo directo: "Sí, aparece" o "No aparece"
-- Para prestadores: indicá nombre, tipo de matrícula y número si están disponibles
-- No des recomendaciones ni listas de pasos
-- Usá español rioplatense"""
+- Máximo 4 líneas
+- Sin listas largas ni recomendaciones
+- Español rioplatense
+- Si no encontrás el dato, decí "No figura en la base" sin agregar nada más"""
 
 
 def search_knowledge_base(query: str) -> str:
@@ -25,20 +43,16 @@ def search_knowledge_base(query: str) -> str:
             seen.add(doc["text"])
             all_texts.append(doc)
     if not all_texts:
-        return "❓ No encontré información sobre eso en la base de normas."
+        return "❓ No encontré información sobre eso en la base."
     context_parts = []
-    sources = set()
-    for doc in all_texts[:6]:
+    for doc in all_texts[:8]:
         context_parts.append(f"[{doc['source']}]\n{doc['text']}")
-        sources.add(doc['source'])
     context = "\n\n---\n\n".join(context_parts)
-    prompt = f"""Datos de la base GL Farma:\n\n{context}\n\n---\n\nConsulta: {query}"""
+    prompt = f"Datos de la base GL Farma:\n\n{context}\n\n---\n\nConsulta del empleado: {query}"
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=300,
+        max_tokens=350,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": prompt}]
     )
-    answer = response.content[0].text
-    source = next(iter(sources))
-    return f"{answer}\n\n📄 {source}"
+    return response.content[0].text
