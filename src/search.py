@@ -1,6 +1,6 @@
 import os
 import anthropic
-from embeddings import search_documents
+from src.embeddings import search_documents
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 

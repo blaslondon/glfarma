@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import pdfplumber
-from embeddings import add_document, get_chroma_client
+from src.embeddings import add_document, get_chroma_client
 
 logger = logging.getLogger(__name__)
 
