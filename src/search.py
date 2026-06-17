@@ -69,7 +69,9 @@ def search_knowledge_base(query: str) -> str:
 
     prompt = f"""{"Datos de la base GL Farma:" + chr(10) + context + chr(10) + chr(10) + "---" + chr(10) if context else "No encontré datos en la base local." + chr(10)}
 
-Consulta: {query}"""
+Consulta: {query}
+
+Si buscás en colfarma.org.ar, priorizá siempre la información más reciente — boletín más nuevo disponible (2026). La info vieja puede estar desactualizada."""
 
     tools = [{"type": "web_search_20250305", "name": "web_search"}] if use_web_search else []
 
