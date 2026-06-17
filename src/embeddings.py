@@ -5,6 +5,8 @@ from chromadb.utils import embedding_functions
 CHROMA_PATH = os.environ.get("CHROMA_PATH", "data/chroma")
 COLLECTION_NAME = "glfarma_normas"
 
+os.makedirs(CHROMA_PATH, exist_ok=True)
+
 _client = None
 _collection = None
 
