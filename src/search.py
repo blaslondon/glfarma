@@ -11,8 +11,9 @@ REGLAS CRÍTICAS:
 1. PRESTADORES: buscá en la base local. Respondé "✅ figura (Mat. X)" o "❌ No figura"
 2. COMISIONADOS: SIEMPRE mostrá SOLO los del listado comisionado GL Farma. Si no hay, decí "Sin comisionados GL Farma". NUNCA sugieras marcas que no estén en el listado.
 3. MÚLTIPLES DROGAS: cada droga es INDEPENDIENTE. NUNCA las combines. Tratá cada una por separado.
-4. NORMAS: si no encontrás en la base local, buscá en colfarma.org.ar priorizando boletín más reciente 2026.
-5. Máximo 5 líneas. Sin advertencias. Español rioplatense.
+4. NORMAS Y BOLETINES: los boletines más recientes pisan las normas anteriores. Si hay conflicto, el boletín más nuevo tiene prioridad.
+5. SI NO ENCONTRÁS: respondé SOLO "No encontré esa información. Consultá con tu supervisor de sucursal o con el supervisor de obras sociales de Lacarra." Sin links, teléfonos ni instrucciones adicionales.
+6. Máximo 5 líneas. Sin advertencias innecesarias. Español rioplatense. Sin emojis de advertencia.
 
 FORMATO RECETA:
 👨‍⚕️ [Prestador] → ✅/❌
@@ -57,31 +58,34 @@ def search_knowledge_base(query: str, history: list = None) -> str:
 
     for doc in search_exact(query)[:3]:
         if doc["text"] not in seen_texts:
-            context_parts.append(f"[PRESTADORES - {doc['source']}]\n{doc['text']}")
+            label = f"[{doc['doc_type'].upper()} {doc['date_score']} - {doc['source']}]"
+            context_parts.append(f"{label}\n{doc['text']}")
             seen_texts.add(doc["text"])
 
     for word in search_words:
         for doc in search_droga(word)[:2]:
             if doc["text"] not in seen_texts:
-                context_parts.append(f"[COMISIONADOS - {doc['source']}]\n{doc['text']}")
+                label = f"[COMISIONADOS - {doc['source']}]"
+                context_parts.append(f"{label}\n{doc['text']}")
                 seen_texts.add(doc["text"])
 
     if not context_parts:
-        for doc in search_documents(query, n_results=5):
+        for doc in search_documents(query, n_results=6):
             if doc["text"] not in seen_texts:
-                context_parts.append(f"[{doc['source']}]\n{doc['text']}")
+                label = f"[{doc['doc_type'].upper()} {doc['date_score']} - {doc['source']}]"
+                context_parts.append(f"{label}\n{doc['text']}")
                 seen_texts.add(doc["text"])
 
-    context = "\n\n---\n\n".join(context_parts[:7]) if context_parts else ""
+    context = "\n\n---\n\n".join(context_parts[:8]) if context_parts else ""
     use_web_search = not context_parts
 
     messages = []
     if history and not is_comisionado_query(query):
         messages.extend(history[:-1])
 
-    prompt = f"""{"Datos GL Farma:" + chr(10) + context + chr(10) + "---" if context else "No encontré en la base local."}
+    prompt = f"""{"Datos GL Farma (boletín más reciente pisa norma anterior):" + chr(10) + context + chr(10) + "---" if context else "No encontré en la base local."}
 
-Consulta: {query}{"" if context else chr(10) + "Buscá en colfarma.org.ar priorizando boletín más reciente 2026."}"""
+Consulta: {query}"""
 
     messages.append({"role": "user", "content": prompt})
     tools = [{"type": "web_search_20250305", "name": "web_search"}] if use_web_search else []
@@ -105,4 +109,4 @@ Consulta: {query}{"" if context else chr(10) + "Buscá en colfarma.org.ar priori
             )
 
     text_parts = [b.text for b in response.content if hasattr(b, "text")]
-    return "\n".join(text_parts) if text_parts else "❓ No encontré información."
+    return "\n".join(text_parts) if text_parts else "No encontré esa información. Consultá con tu supervisor de sucursal o con el supervisor de obras sociales de Lacarra."
