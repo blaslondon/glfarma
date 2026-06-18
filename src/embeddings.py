@@ -47,7 +47,14 @@ def search_documents(query: str, n_results: int = 6):
     docs = []
     for i, doc in enumerate(results["documents"][0]):
         meta = results["metadatas"][0][i]
-        docs.append({"text": doc, "source": meta.get("source", "Desconocido"), "page": meta.get("page", "?")})
+        docs.append({
+            "text": doc,
+            "source": meta.get("source", "Desconocido"),
+            "page": meta.get("page", "?"),
+            "doc_type": meta.get("doc_type", "documento"),
+            "date_score": int(meta.get("date_score", 0) or 0)
+        })
+    docs.sort(key=lambda x: x.get("date_score", 0), reverse=True)
     return docs
 
 
@@ -68,7 +75,14 @@ def search_exact(query: str):
                     if doc not in seen:
                         seen.add(doc)
                         meta = res["metadatas"][i]
-                        results.append({"text": doc, "source": meta.get("source", "Desconocido"), "page": meta.get("page", "?")})
+                        results.append({
+                            "text": doc,
+                            "source": meta.get("source", "Desconocido"),
+                            "page": meta.get("page", "?"),
+                            "doc_type": meta.get("doc_type", "documento"),
+                            "date_score": int(meta.get("date_score", 0) or 0)
+                        })
             except Exception:
                 pass
-    return results[:4]
+    results.sort(key=lambda x: x.get("date_score", 0), reverse=True)
+    return results[:6]
